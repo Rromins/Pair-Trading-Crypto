@@ -7,21 +7,24 @@ from statsmodels.tsa.stattools import adfuller
 
 class PairTradingBacktest(object):
     def __init__(self,
-                 ticker: str,
+                 ticker1: str,
+                 ticker2:str,
                  start: str,
                  end: str,
                  amount: float,
                  ftc=0.0,
                  ptc=0.0,
                  verbose=True):
-        self.ticker = ticker
+        self.ticker1 = ticker1
+        self.ticker2 = ticker2
         self.start = start
         self.end = end
         self.initial_amount = amount
         self.amount = amount
         self.ftc = ftc
         self.ptc = ptc
-        self.units = 0
+        self.units1 = 0
+        self.units2 = 0
         self.position = 0
         self.trades = 0
         self.verbose = verbose
@@ -31,9 +34,14 @@ class PairTradingBacktest(object):
         '''
         Get the data with yahoo finance api, and calculate the needed features. 
         '''
-        df = yf.download(tickers=self.ticker1, start=self.start, end=self.end)
-        df.columns = ['close', 'high', 'low', 'open', 'volume']
-        df['log_returns'] = np.log(df['close'] / df['close'].shift(1))
+        asset1 = yf.download(tickers=self.ticker1, start=self.start, end=self.end)
+        asset1.columns = ['close1', 'high1', 'low1', 'open1', 'volume1']
+        asset2 = yf.download(tickers=self.ticker2, start=self.start, end=self.end)
+        asset2.columns = ['close2', 'high2', 'low2', 'open2', 'volume2']
+        
+        df = pd.concat([asset1['close1'], asset2['close2']], axis=1)
+        df['log_returns1'] = np.log(df['close1'] / df['close1'].shift(1))
+        df['log_returns2'] = np.log(df['close2'] / df['close2'].shift(1))
         self.data = df
 
     def plot_data(self):
@@ -41,74 +49,93 @@ class PairTradingBacktest(object):
         Plot the stock price data.
         '''
         fig, ax = plt.subplots(1, 1)
-        ax.plot(self.data['close'], color='gray', label='close asset')
+        ax.plot(self.data['close1'], color='gray', label='close asset 1')
+        ax.plot(self.data['close2'], color='black', label='close asset 2')
         ax.legend()
-        ax.set_title(f"{self.ticker} close prices")
+        ax.set_title(f"{self.ticker1} and {self.ticker2} close prices")
         plt.plot()
 
     def get_date_price(self, bar):
         '''
-        Return date and price for a given bar
+        Return date and price of asset 1 and 2 for a given bar
         '''
         date = str(self.data.index[bar])
-        price = self.data['close'].iloc[bar]
-        return date, price
+        price1 = self.data['close1'].iloc[bar]
+        price2 = self.data['close2'].iloc[bar]
+        return date, price1, price2
     
     def print_balance(self, bar):
         '''
         Print current cash balance info
         '''
-        date, price = self.get_date_price(bar)
+        date, price1, price2 = self.get_date_price(bar)
         print(f"{date}, current balance: {self.amount:.2f}")
 
     def print_net_wealth(self, bar):
         '''
         Print current net wealth info
         '''
-        date, price = self.get_date_price(bar)
-        net_wealth = self.units * price + self.amount
+        date, price1, price2 = self.get_date_price(bar)
+        net_wealth = self.units1*price1 + self.units2*price2 + self.amount
         print(f"{date}, current net wealth: {net_wealth:.2f}")
 
-    def place_buy_order(self, bar, units=None, amount=None):
+    def place_buy_order(self, bar, asset:int, units=None, amount=None):
         '''
-        Place buy order
+        Place buy order for a given asset 1 or 2
         '''
-        date, price = self.get_date_price(bar)
-        if units is None:
-            units = float(amount / price)
-        self.amount -= (units * price) * (1+self.ptc) + self.ftc
-        self.units += units
-        self.trades += 1
-        if self.verbose:
-            print(f"{date}, buying {units} units at {price:.2f}")
-            self.print_balance(bar)
-            self.print_net_wealth(bar)
+        date, price1, price2 = self.get_date_price(bar)
+        if asset in [1, 2]:
+            price = price1 if asset == 1 else price2
+            if units is None:
+                units = float(amount / price)
+            self.amount -= (units*price) * (1+self.ptc) + self.ftc
+            if asset == 1:
+                self.units1 += units
+            else:
+                self.units2 += units
+            self.trades += 1
+            if self.verbose:
+                print(f"{date}, buying {units} units at {price:.2f}")
+                self.print_balance(bar)
+                self.print_net_wealth(bar)
+        else:
+            print("Enter number 1 or 2 to choose the asset to buy.")
 
-    def place_sell_order(self, bar, units=None, amount=None):
+    def place_sell_order(self, bar, asset:int, units=None, amount=None):
         '''
-        Place a sell order
+        Place a sell order for a given asset 1 or 2
         '''
-        date, price = self.get_date_price(bar)
-        if units is None:
-            units = float(amount / price)
-        self.amount += (units*price) * (1-self.ptc) - self.ftc
-        self.units -= units
-        self.trades += 1
-        if self.verbose:
-            print(f"{date}, selling {units} units at {price:.2f}")
-            self.print_balance(bar)
-            self.print_net_wealth(bar)
+        date, price1, price2 = self.get_date_price(bar)
+        if asset in [1, 2]:
+            price = price1 if asset == 1 else price2
+            if units is None:
+                units = float(amount / price)
+            self.amount += (units*price) * (1-self.ptc) - self.ftc
+            if asset == 1:
+                self.units1 -= units
+            else:
+                self.units2 -= units
+            self.trades += 1
+            if self.verbose:
+                print(f"{date}, selling {units} units at {price:.2f}")
+                self.print_balance(bar)
+                self.print_net_wealth(bar)
+        else:
+            print("Enter number 1 or 2 to choose the asset to sell.")
 
     def close_out(self, bar):
         '''
         Closing out a long or short position
         '''
-        date, price = self.get_date_price(bar)
-        self.amount += self.units * price
-        self.units = 0
+        date, price1, price2 = self.get_date_price(bar)
+        self.amount += self.units1 * price1
+        self.amount += self.units2 * price2
+        self.units1 = 0
+        self.units2 = 0
         self.trades += 1
         if self.verbose:
-            print(f"{date}, inventory {self.units} units at {price:.2f}")
+            print(f"{date}, inventory {self.units1} units at {price1:.2f}")
+            print(f"{date}, inventory {self.units2} units at {price2:.2f}")
             print("-"*55)
             print(f"Final balance  [$] {self.amount:.2f}")
             perf = ((self.amount - self.initial_amount) / self.initial_amount*100)
@@ -116,27 +143,27 @@ class PairTradingBacktest(object):
             print(f"Trades Executed  [#] {self.trades:.2f}")
             print("-"*55)
 
-    def go_long(self, bar, units=None, amount=None):
+    def go_long(self, bar, asset:int, units=None, amount=None):
         # first check if there already a short position, and if yes liquidate it.
         if self.position == -1:
-            self.place_buy_order(bar, units=-self.units)
+            self.place_buy_order(bar, asset, units=-self.units)
         
         if units:
-            self.place_buy_order(bar, units=units)
+            self.place_buy_order(bar, asset, units=units)
         elif amount:
-            self.place_buy_order(bar, amount=amount)
+            self.place_buy_order(bar, asset, amount=amount)
         else:
             print("Enter either units or an amount.")
 
-    def go_short(self, bar, units=None, amount=None):
+    def go_short(self, bar, asset:int, units=None, amount=None):
         # first check if there already a long position, and if yes liquidate it.
         if self.position == 1:
-            self.place_sell_order(bar, units=self.units)
+            self.place_sell_order(bar, asset, units=self.units)
         
         if units:
-            self.place_sell_order(bar, units=units)
+            self.place_sell_order(bar, asset, units=units)
         elif amount:
-            self.place_sell_order(bar, amount=amount)
+            self.place_sell_order(bar, asset, amount=amount)
         else:
             print("Enter either units or an amount.")
 
