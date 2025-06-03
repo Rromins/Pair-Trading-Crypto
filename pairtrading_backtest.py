@@ -169,32 +169,92 @@ class PairTradingBacktest(object):
 
     # ------------------------------------------------------------------------
 
-    def cadf(self):
+    def cadf(self, y, x):
         '''
         Perform a linear regression of x on y, and a Augmented Dickey-Fuller test on the residuals to get the cointegration test p-value.
         Returns: alpha, beta 
         '''
-        df = self.data.copy()
-        model = sm.OLS(df['close1'], sm.add_constant(df['close2']).fit())
+        model = sm.OLS(y, sm.add_constant(x)).fit()
         alpha = model.params[0]
         beta = model.params[1]
         residuals = model.resid.values
         return alpha, beta, residuals, adfuller(residuals)[1]
     
-    def dynamic_cadf(self):
-        df = self.data.copy()
-        total_len = max(len(df['close1']), len(df['close2']))
-        dynamic_alpha = [np.nan]*(self.lags-1)
-        dynamic_beta = [np.nan]*(self.lags-1)
-        dynamic_resid = [np.nan]*(self.lags-1)
-        dynamic_cadf_results = [np.nan]*(self.lags-1)
-        for start in range(total_len-self.lags+1):
-            end = start + self.lags
-            lags_a1 = df['close1'].iloc[start:end]
-            lags_a2 = df['close2'].iloc[start:end]
-            alpha, beta, residuals, cadf_results = self.cadf()
+    def dynamic_cadf(self, lags):
+        dynamic_alpha = [np.nan]*(lags-1)
+        dynamic_beta = [np.nan]*(lags-1)
+        dynamic_resid = [np.nan]*(lags-1)
+        dynamic_cadf_results = [np.nan]*(lags-1)
+        for start in range(len(self.data)-lags+1):
+            end = start + lags
+            lags_a1 = self.data['close1'].iloc[start:end]
+            lags_a2 = self.data['close2'].iloc[start:end]
+            alpha, beta, residuals, cadf_results = self.cadf(y=lags_a1, x=lags_a2)
             dynamic_alpha.append(alpha)
             dynamic_beta.append(beta)
             dynamic_resid.append(residuals[-1])
             dynamic_cadf_results.append(cadf_results)
         return dynamic_alpha, dynamic_beta, dynamic_resid, dynamic_cadf_results
+    
+    def dynamic_hedge_ratio(self, lags):
+        dynamic_hr = [np.nan]*(lags-1)
+        dynamic_resid_hr = [np.nan]*(lags-1)
+        for start in range(len(self.data)-lags+1):
+            end = start + lags
+            lags_a1 = self.data['close1'].iloc[start:end]
+            lags_a2 = self.data['close2'].iloc[start:end]
+            model = sm.OLS(lags_a1, lags_a2).fit()
+            beta = model.params[0]
+            residuals = model.resid.values
+            dynamic_hr.append(beta)
+            dynamic_resid_hr.append(residuals[-1])
+        return dynamic_hr, dynamic_resid_hr
+    
+    def run_pairTrading_strategy(self, lags, threshold):
+        '''
+        Run a pair trading strategy for 2 assets. 
+        '''
+        msg  = f"\n\nRunning pair trading strategy | "
+        msg += f"Number of lags={lags} & thr={threshold}"
+        msg += f"\nfixed costs {self.ftc} | "
+        msg += f"proportional costs {self.ptc}"
+        print(msg)
+        print("-"*55)
+        self.position = 0
+        self.trades = 0
+        self.amount = self.initial_amount
+
+        self.data['dynamic_alpha'], self.data['dynamic_beta'], self.data['dynamic_resid'], self.data['dynamic_cadf_results'] = self.dynamic_cadf(lags)
+        self.data['dynamic_hr'], self.data['dynamic_hr_resid'] = self.dynamic_hedge_ratio(lags)
+        print(self.data)
+        self.data['signals'] = (self.data['dynamic_hr_resid'] - self.data['dynamic_hr_resid'].mean()) / self.data['dynamic_hr_resid'].std()
+        
+        for bar in range(lags, len(self.data)):
+            if self.position == 0:
+                if (self.data['dynamic_cadf_results'].iloc[bar] < 0.05 and self.data['signals'].iloc[bar] < -threshold):
+                    amount = self.amount*0.2
+                    self.go_long(bar, asset=1, amount=amount)
+                    self.go_short(bar, asset=2, amount=amount)
+                    self.position = 1
+                elif (self.data['dynamic_cadf_results'].iloc[bar] < 0.05 and self.data['signals'].iloc[bar] > threshold):
+                    amount = self.amount*0.2
+                    self.go_long(bar, asset=2, amount=amount)
+                    self.go_short(bar, asset=1, amount=amount)
+                    self.position = -1
+            elif self.position == 1:
+                if (self.data['signals'].iloc[bar] >= 0):
+                    self.place_sell_order(bar, asset=1, units=self.units1)
+                    self.place_buy_order(bar, asset=2, units=self.units2)
+                    self.position = 0
+            elif self.position == -1:
+                if (self.data['signals'].iloc[bar] <= 0):
+                    self.place_sell_order(bar, asset=2, units=self.units2)
+                    self.place_buy_order(bar, asset=1, units=self.units1)
+                    self.position = 0
+        self.close_out(bar)
+
+if __name__ == '__main__':
+    start = '2020-01-01'
+    end = '2025-05-01'
+    pairTrading_strategy = PairTradingBacktest(ticker1='BTC-USD', ticker2='ETH-USD', start=start, end=end, amount=1000)
+    pairTrading_strategy.run_pairTrading_strategy(lags=31, threshold=2)
