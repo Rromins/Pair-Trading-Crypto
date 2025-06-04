@@ -194,7 +194,7 @@ class PairTradingBacktest(object):
             dynamic_beta.append(beta)
             dynamic_resid.append(residuals[-1])
             dynamic_cadf_results.append(cadf_results)
-        return dynamic_alpha, dynamic_beta, dynamic_resid, dynamic_cadf_results
+        return dynamic_cadf_results
     
     def dynamic_hedge_ratio(self, lags):
         dynamic_hr = [np.nan]*(lags-1)
@@ -224,7 +224,7 @@ class PairTradingBacktest(object):
         self.trades = 0
         self.amount = self.initial_amount
 
-        self.data['dynamic_alpha'], self.data['dynamic_beta'], self.data['dynamic_resid'], self.data['dynamic_cadf_results'] = self.dynamic_cadf(lags)
+        self.data['dynamic_cadf_results'] = self.dynamic_cadf(lags)
         self.data['dynamic_hr'], self.data['dynamic_hr_resid'] = self.dynamic_hedge_ratio(lags)
         print(self.data)
         self.data['signals'] = (self.data['dynamic_hr_resid'] - self.data['dynamic_hr_resid'].mean()) / self.data['dynamic_hr_resid'].std()
@@ -253,8 +253,31 @@ class PairTradingBacktest(object):
                     self.position = 0
         self.close_out(bar)
 
+    def plot_cadf_results(self):
+        '''
+        Plot the p-value of the dynamic CADF test. 
+        '''
+        fig, ax = plt.subplots(1, 1)
+        ax.plot(self.data['dynamic_cadf_results'], c='gray', label='Dynamic CADF p-value')
+        ax.axhline(y=0.05, ls='--', c='blue', label='p-value')
+        ax.legend()
+        plt.show()
+
+    def plot_time_series(self, threshold):
+        '''
+        Plot the time series used to compute the signals
+        '''
+        fig, ax = plt.subplots(1, 1)
+        ax.plot(self.data['signals'], c='gray', label='Time series')
+        ax.axhline(y=threshold, ls='--', c='blue', label='threshold')
+        ax.axhline(y=-threshold, ls='--', c='blue', label='threshold')
+        ax.legend()
+        plt.show()
+
 if __name__ == '__main__':
-    start = '2020-01-01'
+    start = '2022-01-01'
     end = '2025-05-01'
     pairTrading_strategy = PairTradingBacktest(ticker1='BTC-USD', ticker2='ETH-USD', start=start, end=end, amount=1000)
     pairTrading_strategy.run_pairTrading_strategy(lags=31, threshold=2)
+    pairTrading_strategy.plot_cadf_results()
+    pairTrading_strategy.plot_time_series(threshold=2)
