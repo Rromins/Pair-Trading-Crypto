@@ -167,8 +167,6 @@ class PairTradingBacktest(object):
         else:
             print("Enter either units or an amount.")
 
-# ------------------------------------------------------------------------
-
     def cadf(self, y, x):
         '''
         Perform a linear regression of x on y, and a Augmented Dickey-Fuller test on the residuals to get the cointegration test p-value.
