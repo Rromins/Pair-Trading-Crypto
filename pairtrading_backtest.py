@@ -167,7 +167,7 @@ class PairTradingBacktest(object):
         else:
             print("Enter either units or an amount.")
 
-    # ------------------------------------------------------------------------
+# ------------------------------------------------------------------------
 
     def cadf(self, y, x):
         '''
@@ -275,7 +275,7 @@ class PairTradingBacktest(object):
         plt.show()
 
 if __name__ == '__main__':
-    start = '2022-01-01'
+    start = '2020-01-01'
     end = '2025-05-01'
     pairTrading_strategy = PairTradingBacktest(ticker1='BTC-USD', ticker2='ETH-USD', start=start, end=end, amount=1000)
     pairTrading_strategy.run_pairTrading_strategy(lags=31, threshold=2)
